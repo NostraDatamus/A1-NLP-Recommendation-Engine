@@ -175,16 +175,16 @@ def consolidate_publisher(row):
     for col in ['O_Publisher', 'G_Publisher', 'T_Publisher']:
         if pd.notna(row[col]) and row[col] != 'N/A' and row[col] != '0':
             return row[col]
-    return 'No Text'
+    return 'No_Text'
 
 # Apply the function to create 'Consolidated_Publisher'
 enriched_dataset['Consolidated_Publisher'] = enriched_dataset.apply(consolidate_publisher, axis=1)
 
 # create new column 'Consolidated_Author' by using logic if 'G_Author' is not 'N/A' or null then use 'G_Author' else if 'T_Author' is not 'N/A' or null then use 'T_Author' else if 'O_Author' is not 'N/A' or null then use 'O_Author' else use 'No Text'.
-enriched_dataset['Consolidated_Author'] = np.where(enriched_dataset['G_Author'] != 'N/A', enriched_dataset['G_Author'], np.where(enriched_dataset['T_Author'] != 'N/A', enriched_dataset['T_Author'], np.where(enriched_dataset['O_Author'] != 'N/A', enriched_dataset['O_Author'], 'No Text')))
+enriched_dataset['Consolidated_Author'] = np.where(enriched_dataset['G_Author'] != 'N/A', enriched_dataset['G_Author'], np.where(enriched_dataset['T_Author'] != 'N/A', enriched_dataset['T_Author'], np.where(enriched_dataset['O_Author'] != 'N/A', enriched_dataset['O_Author'], 'No_Text')))
 
 # create new column 'Consolidated_Title' by using logic if 'G_Title' is not 'N/A' or null then use 'G_Title' else if 'O_Title' is not 'N/A' or null then use 'O_Title' else if 'T_Title' is not 'N/A' or null then use 'T_Title' else use 'No Text'.
-enriched_dataset['Consolidated_Title'] = np.where(enriched_dataset['G_Title'] != 'N/A', enriched_dataset['G_Title'], np.where(enriched_dataset['O_Title'] != 'N/A', enriched_dataset['O_Title'], np.where(enriched_dataset['T_Title'] != 'N/A', enriched_dataset['T_Title'], 'No Text')))
+enriched_dataset['Consolidated_Title'] = np.where(enriched_dataset['G_Title'] != 'N/A', enriched_dataset['G_Title'], np.where(enriched_dataset['O_Title'] != 'N/A', enriched_dataset['O_Title'], np.where(enriched_dataset['T_Title'] != 'N/A', enriched_dataset['T_Title'], 'No_Text')))
 # Duplicate the book title for later use in the recommendation engine.
 enriched_dataset['Book Title'] = enriched_dataset['Consolidated_Title']
 # Replace missing titles with 'Unknown Title'
@@ -371,7 +371,7 @@ text_columns = [
 
 # Replace 'No Text' with NaN
 for col in text_columns:
-    cleaned_dataset[col] = cleaned_dataset[col].replace('No Text', pd.NA)
+    cleaned_dataset[col] = cleaned_dataset[col].replace('No_Text', pd.NA)
 
 # Apply the text preprocessing function
 for col in text_columns:
@@ -379,7 +379,7 @@ for col in text_columns:
 
 # Replace NaN back with 'No Text'
 for col in text_columns:
-    cleaned_dataset[col] = cleaned_dataset[col].fillna('No Text')
+    cleaned_dataset[col] = cleaned_dataset[col].fillna('No_Text')
 
 #export the cleaned dataset
 cleaned_dataset.to_excel(cleaned_dataset_path, index=False)
@@ -407,16 +407,11 @@ print("Cleaned Dataset saved successfully.")
 # - Sentence tokenisation precedes word tokenisation to ensure proper segmentation.
 # ------------------------------------------------------------
 
-# Sentence Tokenization Function
-def sentence_tokenize_column(dataset, column):
-    """Tokenize text into sentences and ensure the output is a Python list."""
-    return dataset[column].apply(lambda x: sent_tokenize(x) if pd.notna(x) else [])
+
 
 
 # Apply sentence tokenization
 tokenised_corpus = cleaned_dataset.copy()
-tokenised_corpus['Sentences_Description'] = sentence_tokenize_column(cleaned_dataset, 'Consolidated_Description')
-tokenised_corpus['Sentences_Subject_Matter'] = sentence_tokenize_column(cleaned_dataset, 'Consolidated_Subject_Matter')
 
 # ------------------------------------------------------------
 # 4.2 Word Tokenisation
@@ -435,10 +430,6 @@ def word_tokenize_column(dataset, column):
 tokenised_corpus['Words_Description'] = word_tokenize_column(tokenised_corpus, 'Consolidated_Description')
 tokenised_corpus['Words_Subject_Matter'] = word_tokenize_column(tokenised_corpus, 'Consolidated_Subject_Matter')
 
-
-# Convert lists to JSON strings for saving
-tokenised_corpus['Sentences_Description'] = tokenised_corpus['Sentences_Description'].apply(json.dumps)
-tokenised_corpus['Words_Description'] = tokenised_corpus['Words_Description'].apply(json.dumps)
 
 # Save the tokenized dataset
 print_dataset_summary(tokenised_corpus)
@@ -460,7 +451,7 @@ def parse_stringified_lists(dataset, columns):
     return dataset
 
 # Columns to parse
-token_columns = ['Sentences_Description', 'Words_Description', 'Sentences_Subject_Matter', 'Words_Subject_Matter']
+token_columns = [ 'Words_Description', 'Words_Subject_Matter']
 
 # Parse the columns safely
 tokenised_corpus = parse_stringified_lists(tokenised_corpus, token_columns)
@@ -482,10 +473,7 @@ tokenised_corpus['Bigrams_Trigrams_Words_Description'] = tokenised_corpus['Words
     lambda x: extract_ngrams_for_document(x) if isinstance(x, list) else [])
 tokenised_corpus['Bigrams_Trigrams_Words_Subject_Matter'] = tokenised_corpus['Words_Subject_Matter'].apply(
     lambda x: extract_ngrams_for_document(x) if isinstance(x, list) else [])
-tokenised_corpus['Bigrams_Trigrams_Sentences_Description'] = tokenised_corpus['Sentences_Description'].apply(
-    lambda x: extract_ngrams_for_document(x) if isinstance(x, list) else [])
-tokenised_corpus['Bigrams_Trigrams_Sentences_Subject_Matter'] = tokenised_corpus['Sentences_Subject_Matter'].apply(
-    lambda x: extract_ngrams_for_document(x) if isinstance(x, list) else [])
+
 
 logger.info('Bigrams and Trigrams extracted successfully.')
 
@@ -527,8 +515,8 @@ logger.info("Tokenised Corpus with NER and n-grams saved successfully.")
 # Reasoning/Justification: Ensures the quality of the text data before further processing.
 # ------------------------------------------------------------
 
-# Drop unused features
-
+# Drop unused features Consolidated_Description	Consolidated_Subject_Matter	Consolidated_Publisher	Consolidated_Author	Consolidated_Title
+tokenised_corpus = tokenised_corpus.drop(columns=['Consolidated_Description', 'Consolidated_Subject_Matter', 'Consolidated_Publisher', 'Consolidated_Author', 'Consolidated_Title'])
 
 
 # Save the tokenized dataset with NER and n-grams
