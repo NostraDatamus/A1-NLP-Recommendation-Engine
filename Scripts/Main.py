@@ -25,6 +25,7 @@ Version     : 1.0
 # Purpose: Load all necessary libraries for data handling, text processing, visualisation, and modelling.
 # Reasoning/Justification: Ensures availability of essential tools and modules for all tasks.
 # ------------------------------------------------------------
+import sys
 import pandas as pd
 import numpy as np
 import logging
@@ -32,7 +33,32 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
+import re
+import unicodedata
+from contractions import fix
+from nltk.corpus import stopwords
+import nltk
+import unicodedata
+from contractions import fix
+from nltk.stem import WordNetLemmatizer
+from fuzzywuzzy import fuzz, process
+import nltk
+from nltk.tokenize import sent_tokenize, word_tokenize
+import spacy
+from sklearn.feature_extraction.text import CountVectorizer
+from sklearn.feature_extraction.text import TfidfTransformer
 
+
+# Load spaCy's pre-trained model
+nlp = spacy.load("en_core_web_sm")
+
+nltk.download('stopwords')
+nltk.download('wordnet')
+nltk.download('punkt')
+
+# Initialise the lemmatiser and stop words
+lemmatiser = WordNetLemmatizer()
+stop_words = set(stopwords.words('english'))
 
 # ------------------------------------------------------------
 # 1.2 Configure Logging
@@ -47,6 +73,8 @@ logger = logging.getLogger(__name__)
 # Purpose: Centralise commonly used configurations such as state colours and plotting styles.
 # Reasoning/Justification: Ensures consistency across visualisations and standardises outputs.
 # ------------------------------------------------------------
+
+# Set the default plotting style
 sns.set_theme(style="white")
 plt.rcParams.update({
     'font.size': 10,
@@ -57,6 +85,7 @@ plt.rcParams.update({
     'legend.fontsize': 10
 })
 
+# Define state colours for visualisations
 state_colours = {
     'NSW': '#1f77b4',
     'VIC': '#ff7f0e',
@@ -67,6 +96,8 @@ state_colours = {
     'ACT': '#e377c2',
     'NT': '#7f7f7f'
 }
+
+
 
 # ------------------------------------------------------------
 # 1.4 Load Data
@@ -91,8 +122,11 @@ def print_dataset_summary(dataset):
     print(f"Columns: {dataset.columns}")
     print(f"Missing Values: {dataset.isnull().sum()}")
 
-enriched_dataset_path = 'c:\\university\\A1-NLP-Recommendation-Engine\\datasets\\enriched_dataset.xlsx'
 original_dataset_path = 'c:\\university\\A1-NLP-Recommendation-Engine\\datasets\\original_dataset.xlsx'
+enriched_dataset_path = 'c:\\university\\A1-NLP-Recommendation-Engine\\datasets\\enriched_dataset.xlsx'
+cleaned_dataset_path = 'c:\\university\\A1-NLP-Recommendation-Engine\\datasets\\cleaned_dataset.xlsx'
+tokenised_corpus_path = 'c:\\university\\A1-NLP-Recommendation-Engine\\datasets\\tokenised_corpus.csv'
+
 enriched_dataset, original_dataset = load_data(enriched_dataset_path, original_dataset_path)
 print_dataset_summary(enriched_dataset)
 
@@ -114,28 +148,45 @@ print_dataset_summary(enriched_dataset)
 # - Log any changes or dropped entries for traceability.
 # ------------------------------------------------------------
 
-# Concatenate the columns 'G_Subtitle', 'O_Subtitle', 'G_Description', 'G_TextSnippet', 'T_Description', 'O_Description', 'T_Summary', 'T_Snippet', 'T_Tags', 'T_Comments', 'O_Excerpts' ,'T_Part Of' into a new column 'Consolidated_Description'
+# Consolidate Description information into a single feature 'Consolidated_Description'
 def consolidate_description(row):
-    """ Consolidates multiple description fields into a single column. """
-    return ' '.join([str(row['G_Subtitle']), str(row['O_Subtitle']), str(row['G_Description']), str(row['G_TextSnippet']), str(row['T_Description']), str(row['O_Description']), str(row['T_Summary']), str(row['T_Snippet']), str(row['T_Tags']), str(row['T_Comments']), str(row['O_Excerpts']), str(row['T_Part Of'])])
+    """Consolidates multiple description fields into a single column, ignoring NaN values."""
+    return ' '.join([str(row[col]) for col in [
+        'G_Subtitle', 'O_Subtitle', 'G_Description', 'G_TextSnippet', 
+        'T_Description', 'O_Description', 'T_Summary', 'T_Snippet', 
+        'T_Tags', 'T_Comments', 'O_Excerpts', 'T_Part Of'
+    ] if pd.notna(row[col])]).strip()  # Remove leading/trailing whitespace
 
+# Apply the function
 enriched_dataset['Consolidated_Description'] = enriched_dataset.apply(consolidate_description, axis=1)
 
 # create new feature 'Consolidated_Subject_Matter' Concatenate the Subject Matter columns 'G_Category' and 'O_Subjects' into a new Feature 'Consolidated_Subject_Matter'
 def consolidate_subjects(row):
-    """ Consolidates multiple subject fields into a single column. """
-    return ' '.join([str(row['G_Category']), str(row['O_Subjects'])])
+    """Consolidates multiple subject fields into a single column, ignoring NaN values."""
+    return ' '.join([str(row[col]) for col in ['G_Category', 'O_Subjects'] if pd.notna(row[col])]).strip()
 
+# Apply the function
 enriched_dataset['Consolidated_Subject_Matter'] = enriched_dataset.apply(consolidate_subjects, axis=1)
 
-# create new column 'Consolidated_Publisher' by using logic if 'O_Publisher' is not 'N/A' or null then use 'O_Publisher' else if 'G_Publisher' is not 'N/A' or null then use 'G_Publisher' else if 'T_Publisher' is not 'N/A' or null then use 'T_Publisher' else use 'No Text'.
-enriched_dataset['Consolidated_Publisher'] = np.where(enriched_dataset['O_Publisher'] != 'N/A', enriched_dataset['O_Publisher'], np.where(enriched_dataset['G_Publisher'] != 'N/A', enriched_dataset['G_Publisher'], np.where(enriched_dataset['T_Publisher'] != 'N/A', enriched_dataset['T_Publisher'], 'No Text')))
+# Consolidate Publisher information into a single column 'Consolidated_Publisher'
+def consolidate_publisher(row):
+    for col in ['O_Publisher', 'G_Publisher', 'T_Publisher']:
+        if pd.notna(row[col]) and row[col] != 'N/A' and row[col] != '0':
+            return row[col]
+    return 'No Text'
+
+# Apply the function to create 'Consolidated_Publisher'
+enriched_dataset['Consolidated_Publisher'] = enriched_dataset.apply(consolidate_publisher, axis=1)
 
 # create new column 'Consolidated_Author' by using logic if 'G_Author' is not 'N/A' or null then use 'G_Author' else if 'T_Author' is not 'N/A' or null then use 'T_Author' else if 'O_Author' is not 'N/A' or null then use 'O_Author' else use 'No Text'.
 enriched_dataset['Consolidated_Author'] = np.where(enriched_dataset['G_Author'] != 'N/A', enriched_dataset['G_Author'], np.where(enriched_dataset['T_Author'] != 'N/A', enriched_dataset['T_Author'], np.where(enriched_dataset['O_Author'] != 'N/A', enriched_dataset['O_Author'], 'No Text')))
 
 # create new column 'Consolidated_Title' by using logic if 'G_Title' is not 'N/A' or null then use 'G_Title' else if 'O_Title' is not 'N/A' or null then use 'O_Title' else if 'T_Title' is not 'N/A' or null then use 'T_Title' else use 'No Text'.
 enriched_dataset['Consolidated_Title'] = np.where(enriched_dataset['G_Title'] != 'N/A', enriched_dataset['G_Title'], np.where(enriched_dataset['O_Title'] != 'N/A', enriched_dataset['O_Title'], np.where(enriched_dataset['T_Title'] != 'N/A', enriched_dataset['T_Title'], 'No Text')))
+# Duplicate the book title for later use in the recommendation engine.
+enriched_dataset['Book Title'] = enriched_dataset['Consolidated_Title']
+# Replace missing titles with 'Unknown Title'
+enriched_dataset['Book Title'] = enriched_dataset['Book Title'].fillna('Unknown Title')
 
 # ------------------------------------------------------------
 # 2.2 Create Published Decade Feature
@@ -174,7 +225,8 @@ def assign_published_decade(year):
     elif year < 1900:
         return "Historical Text"
     else:
-        return f"{(year // 10) * 10}s"
+        return f"{int((year // 10) * 10)}s"  # Ensure no decimals in output
+
 
 # Apply decade assignment
 enriched_dataset['Consolidated_Published_Year'] = enriched_dataset.apply(consolidate_latest_year, axis=1)
@@ -210,73 +262,39 @@ enriched_dataset['Length'] = pd.cut(
 ).cat.add_categories("Unknown Number of Pages").fillna("Unknown Number of Pages")
 
 # ------------------------------------------------------------
-# 2.2 Handle Null Values
-# Purpose: Replace missing values in text fields with 'No_Text' and categorical fields with 'Unknown'.
+# 2.2 Data Cleaning
+# Purpose: Clean the dataset by handling missing values and removing unessessary data.
 # Reasoning/Justification: Prevents processing errors and standardises missing data handling.
 # Notes:
 # - 'No_Text' is used as a placeholder for missing text fields to ensure compatibility with text processing steps.
-# - 'Unknown' is applied to categorical fields (e.g., Length, Published_Decade).
+# - Rows with missing API data are dropped to maintain data integrity.
+# - Unused features are removed to streamline the dataset.
 # ------------------------------------------------------------
 
-print_dataset_summary(enriched_dataset)
-enriched_dataset.to_excel('c:\\university\\A1-NLP-Recommendation-Engine\\Outputs\\enriched_dataset_inspection.xlsx', index=False)
+# Fill missing values with 'No_Text' or 'Unknown'
+enriched_dataset[['Consolidated_Description', 'Consolidated_Subject_Matter', 
+                  'Consolidated_Publisher', 'Consolidated_Author', 'Consolidated_Title']] = (
+    enriched_dataset[['Consolidated_Description', 'Consolidated_Subject_Matter', 
+                      'Consolidated_Publisher', 'Consolidated_Author', 'Consolidated_Title']]
+    .replace('', 'No_Text')  # Replace empty strings
+    .fillna('No_Text')       # Replace NaN
+)
 
+# Drop rows that have no API data and print number dropped
+rows_to_drop = enriched_dataset[['G_Title', 'O_Title', 'T_Title']].replace('', np.nan).isna().all(axis=1)
+enriched_dataset = enriched_dataset[~rows_to_drop]
 
-# ------------------------------------------------------------
-# 2.3 Row Dropping
-# Purpose: Remove rows with 5+ columns containing 'No_Text' or 'Unknown'.
-# Reasoning/Justification: Improves dataset quality by eliminating records with excessive missing data.
-# Notes:
-# - Log the number of rows before and after dropping.
-# - Calculate and log the percentage of rows dropped.
-# ------------------------------------------------------------
-# REMOVE ISBNs WITH NO MATCHES WITH ANY API
-def drop_invalid_isbns(dataframe, invalid_isbns):
-    """ Drops rows with ISBNs that didn't return a match from any of the APIs. """
-    return dataframe[~dataframe['ISBN'].astype(str).isin(invalid_isbns)]
+print(f"Number of rows dropped: {rows_to_drop.sum()}")
+print(f"Remaining rows: {len(enriched_dataset)}")
 
-# List of invalid ISBNs
-invalid_isbns = [
-    "9781862512634", "9780730362616", "9798708474995", "9780980309126", "9783600131398",
-    "9781488695971", "9780076716623", "9780076855049", "9780078971747", "9781741307641",
-    "2019052211324", "9788877610867", "9780076757480", "9780134806631", "9781284142945",
-    "9780134637044", "9780136592723", "9780079031808", "9780076775682", "9780730378365",
-    "9780547901893", "9780987634559", "9783223221971", "9780190307035", "9780076644667",
-    "9780133343168", "9781876703530", "9780987104540", "9780980831573", "9781108720335",
-    "9781925505382", "9780655796473", "9781108652339", "9781108603270", "9781108771023",
-    "9781108766333", "9780170450508", "9780190306984", "9780076716753", "9781264335794",
-    "9780076923441", "9780077023171", "9780190313586", "9780190313654", "9780076819690",
-    "9780655780731", "9780077005603", "9780648589624"]
+# Drop unused features
+enriched_dataset = enriched_dataset.drop(columns=['G_Title', 'G_Subtitle', 'G_Author', 'G_Publisher', 'G_Date', 'G_Description', 'G_Category', 'G_Page_Count', 'G_TextSnippet', 'T_Title', 'T_Author', 'T_Publisher', 'T_Date', 'T_Description', 'T_Tags', 'T_Comments', 'T_Part Of', 'T_Summary', 'T_Snippet', 'O_Title', 'O_Subtitle', 'O_Author', 'O_Publisher', 'O_Date', 'O_Description', 'O_Excerpts', 'O_Subjects', 'O_Page_Count', 'Consolidated_Published_Year', 'Consolidated_Page_Count'])
 
-# Drop rows with these ISBNs
-original_dataset = drop_invalid_isbns(original_dataset, invalid_isbns)
-enriched_dataset = drop_invalid_isbns(enriched_dataset, invalid_isbns)
-
-# Convert ISBNs to strings and strip whitespace
-enriched_dataset['ISBN'] = enriched_dataset['ISBN'].astype(str)
-enriched_dataset['ISBN'] = enriched_dataset['ISBN'].str.strip()
-
-# Display the updated DataFrames
-print(original_dataset.head())
-print(enriched_dataset.head())
-
-
-# ------------------------------------------------------------
-# 2.5 Outlier Detection
-# Purpose: Detect and address outliers in numerical fields (e.g., Page Count).
-# Reasoning/Justification: Improves data quality by mitigating the impact of extreme values.
-# Notes:
-# - Outliers in Page Count can distort length-based recommendations.
-# - Apply thresholds or transformations (e.g., log scaling) as needed.
-# ------------------------------------------------------------
-
-# ------------------------------------------------------------
-# 2.6 Standardisation
-# Purpose: Ensure numerical fields are standardised (e.g., Length).
-# Reasoning/Justification: Normalisation improves comparability and supports similarity calculations.
-# Notes:
-# - Use min-max scaling or z-score standardisation based on field requirements.
-# ------------------------------------------------------------
+# Save the cleaned dataset
+cleaned_dataset = enriched_dataset.copy()
+print_dataset_summary(cleaned_dataset)
+#cleaned_dataset.to_excel(cleaned_dataset_path, index=False)
+cleaned_dataset.to_csv(r'c:\\university\\A1-NLP-Recommendation-Engine\\Outputs\\cleaned_dataset.csv', index=False)
 
 
 # ============================================================
@@ -284,126 +302,99 @@ print(enriched_dataset.head())
 # ============================================================
 
 # ------------------------------------------------------------
-# 3.1 Normalise Text Case
+# 3.1 Custom Vocabulary & Stop Words Building
+# Purpose: Load custom vocabulary and stop words list for text processing.
+# Reasoning/Justification: Enhances text processing by incorporating domain-specific terms and removing irrelevant words.
+# - Ensure curriculum-related terms are prioritised.
+# ------------------------------------------------------------
+
+# load Custom_Vocab.py file
+# Import custom vocabulary lists
+from Custom_Vocab import (
+    science_vocab, 
+    mathematics_vocab, 
+    english_vocab, 
+    performance_arts_vocab, 
+    practical_studies_vocab, 
+    business_and_law_vocab, 
+    design_and_technology_vocab, 
+    environmental_science_vocab, 
+    humanities_vocab, 
+    languages_vocab
+)
+
+# ------------------------------------------------------------
+# 3.2 Text Cleaning
 # Purpose: Convert all text to lowercase to standardise text.
 # Reasoning/Justification: Removes case-based inconsistencies.
-# ------------------------------------------------------------
-
-# ------------------------------------------------------------
-# 3.2 Remove Punctuation and Special Characters
-# Purpose: Clean text by removing unnecessary punctuation and symbols.
-# Reasoning/Justification: Reduces noise and improves tokenisation.
-# ------------------------------------------------------------
-
-# ------------------------------------------------------------
-# 3.3 Expand Contractions
-# Purpose: Replace contractions with their full forms.
-# Reasoning/Justification: Improves tokenisation and text standardisation by avoiding fragmented words.
 # Notes:
-# - For example, "can't" will be converted to "cannot."
+# - Normalise Text Case ensures consistent comparisons during similarity calculations.
+# - Removed Punctuation and Special Characters to clean text by removing unnecessary punctuation and symbols.
+# - Expand Contractions to replace contractions with their full forms.
+# - Fix Encoding Issues to replace or remove non-standard encoding artifacts (e.g., Foreign character, smart quotes).
+# - Whitespace Normalisation to remove excessive whitespace or line breaks.
+# - Remove Stopwords to eliminate common words that do not contribute to the meaning.
+# - Lemmatisation to reduce words to their base or root form.
 # ------------------------------------------------------------
 
-# ------------------------------------------------------------
-# 3.4 Fix Encoding Issues
-# Purpose: Replace or remove non-standard encoding artifacts (e.g., Foreign character, smart quotes).
-# Reasoning/Justification: Prevents processing errors and ensures clean text representation.
-# Notes:
-# ------------------------------------------------------------
+# Combined function for text preprocessing
+def preprocess_text(text):
+    if pd.isna(text):  # Skip NaN values
+        return text
+    
+    # Expand contractions (e.g., "can't" -> "cannot")
+    text = fix(text)
+    
+    # Normalise Unicode and remove non-Latin characters
+    text = unicodedata.normalize('NFKD', text).encode('ascii', 'ignore').decode('utf-8')
+    
+    # Convert to lowercase
+    text = text.lower()
+    
+    # Remove all punctuation and symbols except hyphens, apostrophes, and numbers
+    text = re.sub(r"[^a-z0-9\s\-']", ' ', text)
+    
+    # Replace multiple spaces and strip leading/trailing spaces
+    text = re.sub(r'\s+', ' ', text).strip()
+    
+    # Tokenise, remove stopwords, and lemmatise words
+    words = text.split()
+    cleaned_words = [lemmatiser.lemmatize(word) for word in words if word not in stop_words]
+    
+    # Rejoin into a cleaned string
+    return ' '.join(cleaned_words)
+
+# List of text columns to process
+text_columns = [
+    'Consolidated_Description', 'Consolidated_Subject_Matter',
+    'Consolidated_Publisher', 'Consolidated_Author', 'Consolidated_Title'
+]
+
+# Replace 'No Text' with NaN
+for col in text_columns:
+    cleaned_dataset[col] = cleaned_dataset[col].replace('No Text', pd.NA)
+
+# Apply the text preprocessing function
+for col in text_columns:
+    cleaned_dataset[col] = cleaned_dataset[col].apply(preprocess_text)
+
+# Replace NaN back with 'No Text'
+for col in text_columns:
+    cleaned_dataset[col] = cleaned_dataset[col].fillna('No Text')
 
 # ------------------------------------------------------------
-# 3.5 Whitespace Normalisation
-# Purpose: Remove excessive whitespace or line breaks.
-# Reasoning/Justification: Ensures clean token boundaries and reduces noise in tokenisation.
-# Notes:
-# ------------------------------------------------------------
-
-# ------------------------------------------------------------
-# 3.6 Remove Stopwords
-# Purpose: Remove frequently occurring but semantically insignificant words (e.g., 'and', 'the').
-# Reasoning/Justification: Improves text representation by focusing on meaningful words.
-# ------------------------------------------------------------
-
-# ------------------------------------------------------------
-# 3.7 Apply Stemming or Lemmatization
-# Purpose: Reduce words to their root form.
-# Reasoning/Justification: Normalises text variations for better similarity calculations.
-# ------------------------------------------------------------
-
-# ------------------------------------------------------------
-# 3.8 Corpus Validation
+# 3.3 Near-Duplicate Detection and Removal
 # Purpose: Validate the cleaned corpus to ensure no invalid placeholders (e.g., 'No_Text') remain.
 # Reasoning/Justification: Ensures the quality of the text data before further processing.
 # ------------------------------------------------------------
 
 
-# ============================================================
-# 3. TEXT CLEANING AND NORMALISATION
-# ============================================================
-
-# ------------------------------------------------------------
-# 3.1 Normalise Text Case
-# Purpose: Convert all text to lowercase to standardise text.
-# Reasoning/Justification: Removes case-based inconsistencies.
-# Notes:
-# - Standardising the case ensures consistent comparisons during similarity calculations.
-# ------------------------------------------------------------
-
-# ------------------------------------------------------------
-# 3.2 Remove Punctuation and Special Characters
-# Purpose: Clean text by removing unnecessary punctuation and symbols.
-# Reasoning/Justification: Reduces noise and improves tokenisation.
-# Notes:
-# - Symbols that do not contribute to semantic meaning, such as commas and periods, are removed.
-# ------------------------------------------------------------
-
-# ------------------------------------------------------------
-# 3.3 Expand Contractions
-# Purpose: Replace contractions with their full forms.
-# Reasoning/Justification: Improves tokenisation and text standardisation by avoiding fragmented words.
-# Notes:
-# - For example, "can't" will be converted to "cannot."
-# ------------------------------------------------------------
-
-# ------------------------------------------------------------
-# 3.4 Fix Encoding Issues
-# Purpose: Replace or remove non-standard encoding artifacts (e.g., smart quotes).
-# Reasoning/Justification: Prevents processing errors and ensures clean text representation.
-# ------------------------------------------------------------
-
-# ------------------------------------------------------------
-# 3.5 Whitespace Normalisation
-# Purpose: Remove excessive whitespace or line breaks.
-# Reasoning/Justification: Ensures clean token boundaries and reduces noise in tokenisation.
-# ------------------------------------------------------------
-
-# ------------------------------------------------------------
-# 3.6 Remove Stopwords
-# Purpose: Remove frequently occurring but semantically insignificant words (e.g., 'and', 'the').
-# Reasoning/Justification: Improves text representation by focusing on meaningful words.
-# Notes:
-# - Custom stopword lists may be added for project-specific noise words.
-# ------------------------------------------------------------
-
-# ------------------------------------------------------------
-# 3.7 Apply Stemming or Lemmatisation
-# Purpose: Reduce words to their root or base forms.
-# Reasoning/Justification: Normalises text variations for better similarity calculations.
-# Notes:
-# - Lemmatisation is preferred for retaining semantic meaning.
-# ------------------------------------------------------------
-
-# ------------------------------------------------------------
-# 3.8 Retain Numbers
-# Purpose: Retain numeric data in the text corpus.
-# Reasoning/Justification: Numbers are often semantically significant in educational texts (e.g., grade levels).
-# Notes:
-# - Ensure that numbers are not removed during cleaning.
-# ------------------------------------------------------------
-
 
 # ============================================================
 # 4. TEXT REPRESENTATION AND TOKENISATION
 # ============================================================
+
+
 
 # ------------------------------------------------------------
 # 4.1 Sentence Tokenisation
@@ -413,6 +404,15 @@ print(enriched_dataset.head())
 # - Sentence tokenisation precedes word tokenisation to ensure proper segmentation.
 # ------------------------------------------------------------
 
+def sentence_tokenize_column(dataset, column):
+    """Tokenize the text in the specified column into sentences."""
+    return dataset[column].apply(lambda x: sent_tokenize(x) if pd.notna(x) else [])
+
+# Apply sentence tokenization
+tokenised_corpus = cleaned_dataset.copy()
+tokenised_corpus['Sentences_Description'] = sentence_tokenize_column(cleaned_dataset, 'Consolidated_Description')
+tokenised_corpus['Sentences_Subject_Matter'] = sentence_tokenize_column(cleaned_dataset, 'Consolidated_Subject_Matter')
+
 # ------------------------------------------------------------
 # 4.2 Word Tokenisation
 # Purpose: Split sentences into individual words or tokens for further processing.
@@ -421,8 +421,44 @@ print(enriched_dataset.head())
 # - Retains numerics and tokens relevant to the domain.
 # ------------------------------------------------------------
 
+def word_tokenize_column(dataset, column):
+    return dataset[column].apply(lambda x: word_tokenize(x) if pd.notna(x) else [])
+
+# Apply word tokenization
+tokenised_corpus['Words_Description'] = word_tokenize_column(tokenised_corpus, 'Consolidated_Description')
+tokenised_corpus['Words_Subject_Matter'] = word_tokenize_column(tokenised_corpus, 'Consolidated_Subject_Matter')
+
+# Save the tokenized dataset
+print_dataset_summary(tokenised_corpus)
+tokenised_corpus.to_csv(tokenised_corpus_path, index=False)
+print("Tokenised Corpus saved successfully.")
+
 # ------------------------------------------------------------
-# 4.3 Named Entity Recognition (NER)
+# 4.3 Bigram/Trigram Extraction
+# Purpose: Identify multi-word phrases to enhance contextual representation.
+# Reasoning/Justification: Captures semantic meaning by identifying commonly co-occurring terms (e.g., "data science").
+# Notes:
+# - Use statistical measures like PMI to filter meaningful bigrams/trigrams.
+# ------------------------------------------------------------
+
+def extract_ngrams_for_document(document, ngram_range=(2, 3)):
+    """Extract bigrams and trigrams from a single document."""
+    vectorizer = CountVectorizer(ngram_range=ngram_range)
+    try:
+        X = vectorizer.fit_transform([document])
+        tfidf_transformer = TfidfTransformer()
+        X_tfidf = tfidf_transformer.fit_transform(X)
+        return vectorizer.get_feature_names_out()
+    except ValueError:
+        return []
+
+# Apply bigram/trigram extraction
+tokenised_corpus['Bigrams_Trigrams_Description'] = tokenised_corpus['Consolidated_Description'].apply(lambda x: extract_ngrams_for_document(x) if pd.notna(x) else [])
+tokenised_corpus['Bigrams_Trigrams_Subject_Matter'] = tokenised_corpus['Consolidated_Subject_Matter'].apply(lambda x: extract_ngrams_for_document(x) if pd.notna(x) else [])
+print('Bigrams and Trigrams extracted successfully.')
+
+# ------------------------------------------------------------
+# 4.4 Named Entity Recognition (NER)
 # Purpose: Identify named entities (e.g., person, organisation, location) in the text.
 # Reasoning/Justification: Provides additional contextual features for downstream tasks.
 # Notes:
@@ -430,397 +466,87 @@ print(enriched_dataset.head())
 # - Entities can include educational terms, locations, and institutions.
 # ------------------------------------------------------------
 
-# ------------------------------------------------------------
-# 4.4 Bigram/Trigram Extraction
-# Purpose: Identify multi-word phrases to enhance contextual representation.
-# Reasoning/Justification: Captures semantic meaning by identifying commonly co-occurring terms (e.g., "data science").
-# Notes:
-# - Use statistical measures like PMI to filter meaningful bigrams/trigrams.
-# ------------------------------------------------------------
+def extract_named_entities(text):
+    """Extract named entities from text using spaCy."""
+    doc = nlp(text)
+    return [(ent.text, ent.label_) for ent in doc.ents]
+
+# Apply named entity recognition
+tokenised_corpus['NER_Description'] = tokenised_corpus['Consolidated_Description'].apply(lambda x: extract_named_entities(x) if pd.notna(x) else [])
+tokenised_corpus['NER_Subject_Matter'] = tokenised_corpus['Consolidated_Subject_Matter'].apply(lambda x: extract_named_entities(x) if pd.notna(x) else [])
+tokenised_corpus['NER_Publisher'] = tokenised_corpus['Consolidated_Publisher'].apply(lambda x: extract_named_entities(x) if pd.notna(x) else [])
+tokenised_corpus['NER_Author'] = tokenised_corpus['Consolidated_Author'].apply(lambda x: extract_named_entities(x) if pd.notna(x) else [])
 
 # ------------------------------------------------------------
-# 4.5 Domain-Specific Phrase Extraction
-# Purpose: Extract domain-specific phrases relevant to the educational context (e.g., "grade 7 curriculum").
-# Reasoning/Justification: Enhances the representation of domain-relevant phrases for better similarity calculations.
-# Notes:
-# - Combine results from bigram/trigram extraction with domain-specific knowledge.
-# ------------------------------------------------------------
-
-# ------------------------------------------------------------
-# 4.6 Part-of-Speech (POS) Tagging
-# Purpose: Tag parts of speech to add linguistic context for advanced processing tasks.
-# Reasoning/Justification: Helps in filtering irrelevant words and improving vocabulary relevance.
-# Notes:
-# - Example: Retaining nouns and adjectives for content-heavy text analysis.
-# ------------------------------------------------------------
-
-# ------------------------------------------------------------
-# 4.7 Custom Vocabulary Building
-# Purpose: Curate the vocabulary to include domain-specific terms and exclude unnecessary tokens.
-# Reasoning/Justification: Aligns text representation with the educational domain and improves recommendation relevance.
-# Notes:
-# - Ensure curriculum-related terms are prioritised.
+# 3.4 Corpus Validation
+# Purpose: Validate the cleaned corpus to ensure no invalid placeholders (e.g., 'No_Text') remain.
+# Reasoning/Justification: Ensures the quality of the text data before further processing.
 # ------------------------------------------------------------
 
 
+
+# Save the tokenized dataset with NER and n-grams
+print_dataset_summary(tokenised_corpus)
+tokenised_corpus.to_csv(tokenised_corpus_path, index=False)
+print("Tokenised Corpus with NER and n-grams saved successfully.")
+
+
+# ************************************************************
 # ============================================================
-# 5. BUILDING THE DOCUMENT MATRIX
+# MILESTONE 2. PRODUCE A PRE-PROCESSED TEXT CORPUS
+#
+# - Normalised Text Data
+# - Tokenised Text Data
+# - Bigram/Trigram Extraction
+# - Named Entity Recognition
+#
 # ============================================================
-
-# ------------------------------------------------------------
-# 5.1 Create Term Frequency-Inverse Document Frequency (TF-IDF) Matrix
-# Purpose: Represent text numerically based on term importance.
-# Reasoning/Justification: Captures the relevance of terms while reducing the impact of common words.
-# Notes:
-# - TF-IDF is suitable for content-based recommendation systems due to its focus on term importance.
-# ------------------------------------------------------------
-
-# ------------------------------------------------------------
-# 5.2 Generate Document Term Matrix
-# Purpose: Create the TF-IDF matrix using the tokenised text.
-# Reasoning/Justification: Provides a numerical representation of text for similarity calculations.
-# Notes:
-# - Ensure input text uses the cleaned and tokenised corpus.
-# - Retain alignment with the custom vocabulary created earlier.
-# ------------------------------------------------------------
-
-# ------------------------------------------------------------
-# 5.3 Inspect Sparsity
-# Purpose: Evaluate the sparsity of the TF-IDF matrix.
-# Reasoning/Justification: Identifies potential issues with high-dimensional sparse data.
-# Notes:
-# - If sparsity is too high, consider dimensionality reduction techniques.
-# ------------------------------------------------------------
-
-# ------------------------------------------------------------
-# 5.4 Apply Dimensionality Reduction (if necessary)
-# Purpose: Reduce the dimensionality of the document matrix.
-# Reasoning/Justification: Improves computational efficiency without sacrificing relevance.
-# Notes:
-# - Techniques like Singular Value Decomposition (SVD) may be applied.
-# ------------------------------------------------------------
-
-# ------------------------------------------------------------
-# 5.5 Save Document Matrix
-# Purpose: Save the TF-IDF matrix for reproducibility and downstream tasks.
-# Reasoning/Justification: Ensures the matrix can be reused without reprocessing.
-# Notes:
-# - Use a suitable file format such as `.npz` for sparse matrices.
-# ------------------------------------------------------------
+# ************************************************************
 
 
+
+
+
+
+
+
+# ************************************************************
 # ============================================================
-# 6. SIMILARITY COMPUTATION
+# MILESTONE 3. PRODUCE A DOCUMENT-TERM MATRIX
 # ============================================================
-
-# ------------------------------------------------------------
-# 6.1 Compute Cosine Similarity
-# Purpose: Calculate text similarity using cosine similarity on the TF-IDF matrix.
-# Reasoning/Justification: Captures the semantic similarity between documents in a high-dimensional space.
-# Notes:
-# - Cosine similarity is computationally efficient and suitable for sparse matrices.
-# ------------------------------------------------------------
-
-# ------------------------------------------------------------
-# 6.2 Apply Adjacent Year Group Weighting
-# Purpose: Reduce similarity scores for adjacent year groups by 50%.
-# Reasoning/Justification: Maintains relevance while accounting for natural variance in the dataset.
-# Notes:
-# - Adjacent year groups receive lower weight compared to the actual year group.
-# ------------------------------------------------------------
-
-# ------------------------------------------------------------
-# 6.3 Weight Similarity Features
-# Purpose: Combine multiple similarity scores (e.g., text, subject, year group) into a single weighted score.
-# Reasoning/Justification: Balances the importance of different features in generating recommendations.
-# Notes:
-# - Support configurable weights for each feature to customise recommendations.
-# ------------------------------------------------------------
-
-# ------------------------------------------------------------
-# 6.4 Normalise Similarity Scores
-# Purpose: Scale all similarity scores to a common range (e.g., 0-1).
-# Reasoning/Justification: Ensures interpretability and consistency when combining multiple similarity metrics.
-# Notes:
-# - Normalisation aids in effectively combining scores from different features.
-# ------------------------------------------------------------
-
-# ------------------------------------------------------------
-# 6.5 Filter by Relevance Threshold
-# Purpose: Exclude items below a predefined similarity threshold.
-# Reasoning/Justification: Ensures the quality of recommendations by filtering out irrelevant results.
-# Notes:
-# - The threshold value should be adjustable based on the use case.
-# ------------------------------------------------------------
+# ************************************************************
 
 
+
+# ************************************************************
 # ============================================================
-# 7. CORPUS EXPLORATORY DATA ANALYSIS
+# MILESTONE 4. PRODUCE A SIMILARITY MATRIX
 # ============================================================
-
-# ------------------------------------------------------------
-# 7.1 Corpus Summary and Statistics
-# Purpose: Summarise key statistics of the corpus to understand its overall structure.
-# Reasoning/Justification: Provides an overview of corpus characteristics such as size, content, and feature distribution.
-# Notes:
-# ------------------------------------------------------------
-
-# ------------------------------------------------------------
-# 7.2 Document Metrics
-# Purpose: Calculate metrics for evaluating the corpus structure and its alignment with project objectives.
-# Reasoning/Justification: Provides insights into corpus characteristics, ensuring completeness and relevance.
-# Notes:
-# - Metrics to include:
-#   - Total Documents
-#   - Total Tokens
-#   - Total Phrases
-#   - Total Entries
-#   - Average Tokens per Document
-#   - Average Phrases per Document
-#   - Average Entries per Document
-#   - Average Phrases per Entry
-#   - Average Tokens per Entry
-#   - Average Tokens per Phrase
-#   - Vocabulary of Target Tokens
-#   - Out of Vocabulary Tokens
-# ------------------------------------------------------------
-
-# ------------------------------------------------------------
-# 7.3 Visualise Term Frequencies
-# Purpose: Identify the most and least common terms in the corpus.
-# Reasoning/Justification: Highlights dominant terms and informs feature selection.
-# ------------------------------------------------------------
-
-# ------------------------------------------------------------
-# 7.4 Inspect Class Distributions
-# Purpose: Examine distributions across target labels (e.g., Subject).
-# Reasoning/Justification: Identifies potential imbalances.
-# ------------------------------------------------------------
-
-# ------------------------------------------------------------
-# 7.5 Explore Token Distributions
-# Purpose: Analyse token frequency, average token length, and other metrics to understand corpus characteristics.
-# Reasoning/Justification: Identifies potential issues like excessive sparsity or irrelevant terms.
-# ------------------------------------------------------------
-
-# ------------------------------------------------------------
-# 7.6 Analyse Corpus Sparsity
-# Purpose: Evaluate the sparsity of the document matrix to identify gaps in representation.
-# Reasoning/Justification: Ensures the matrix is neither overly sparse nor dense.
-# ------------------------------------------------------------
-
-# ------------------------------------------------------------
-# 7.7 Validate Vocabulary Coverage
-# Purpose: Ensure the vocabulary effectively covers the domain-specific terms and corpus content.
-# Reasoning/Justification: Aligns the vocabulary with the recommendation engine's focus areas.
-# ------------------------------------------------------------
-
-# ------------------------------------------------------------
-# 7.8 Identify Outliers
-# Purpose: Detect anomalous entries in the corpus or matrix that may skew analysis.
-# Reasoning/Justification: Prevents outliers from disproportionately influencing the results.
-# ------------------------------------------------------------
+# ************************************************************
 
 
+
+# ************************************************************
 # ============================================================
-# 8. BUILDING THE RECOMMENDATION ENGINE
+# MILESTONE 5. PRODUCE A FUNCTIONAL RECOMMENDATION ENGINE
 # ============================================================
-
-# ------------------------------------------------------------
-# 8.1 Input Validation
-# Purpose: Validate user inputs to ensure sufficient data for recommendation generation.
-# Reasoning/Justification: Prevents errors by ensuring required inputs are provided.
-# Notes:
-# - Ensure at least two of the three inputs (ISBN, Subject, Year Group) are given.
-# - Prompt users for missing inputs if necessary.
-# ------------------------------------------------------------
-
-# ------------------------------------------------------------
-# 8.2 Compute Combined Similarity Scores
-# Purpose: Integrate text, subject, and year group similarity scores using predefined or optimised weights.
-# Reasoning/Justification: Ensures all relevant features are considered for personalised recommendations.
-# Notes:
-# - Normalise and combine similarity scores for interpretability.
-# - Adjust weights for features based on domain relevance.
-# ------------------------------------------------------------
-
-# ------------------------------------------------------------
-# 8.3 Apply Adjacent Year Group Weighting
-# Purpose: Adjust similarity scores for adjacent year groups by 50%.
-# Reasoning/Justification: Ensures relevance while accounting for natural variance in educational levels.
-# Notes:
-# - Prioritise actual year groups over adjacent groups.
-# ------------------------------------------------------------
-
-# ------------------------------------------------------------
-# 8.4 Filter Recommendations
-# Purpose: Exclude items below a predefined relevance threshold.
-# Reasoning/Justification: Ensures only high-quality recommendations are presented.
-# Notes:
-# - Make the threshold configurable.
-# ------------------------------------------------------------
-
-# ------------------------------------------------------------
-# 8.5 Rank Recommendations
-# Purpose: Rank books by combined similarity scores.
-# Reasoning/Justification: Delivers the most relevant recommendations to the user.
-# ------------------------------------------------------------
-
-# ------------------------------------------------------------
-# 8.6 Handle Insufficient Recommendations
-# Purpose: Return as many recommendations as possible if the top-N threshold is not met.
-# Reasoning/Justification: Ensures usability even with limited data.
-# ------------------------------------------------------------
-
-# ------------------------------------------------------------
-# 8.7 Format Recommendations
-# Purpose: Prepare output to display Book Title, Subject, Length, Published Decade, and similarity score.
-# Reasoning/Justification: Ensures outputs are user-friendly and informative.
-# Notes:
-# - Include a star rating based on normalised similarity scores (0-5).
-# ------------------------------------------------------------
-
-# ------------------------------------------------------------
-# 8.8 Log Recommendations
-# Purpose: Document inputs, outputs, and decision-making details for traceability.
-# Reasoning/Justification: Ensures transparency and aids debugging.
-# Notes:
-# - Log to both console and a dedicated file.
-# ------------------------------------------------------------
+# ************************************************************
 
 
+
+# ************************************************************
 # ============================================================
-# 9. HYPERTUNING, VALIDATION AND OPTIMISATION
+# MILESTONE 6. VALIDATE AND OPTIMISE THE RECOMMENDATION ENGINE
 # ============================================================
-
-# ------------------------------------------------------------
-# 9.1 Define Hyperparameter Search Space
-# Purpose: Specify ranges for similarity weights, relevance thresholds, and other tunable parameters.
-# Reasoning/Justification: Ensures systematic exploration of parameter combinations.
-# Notes:
-# - Include predefined ranges based on domain knowledge.
-# ------------------------------------------------------------
-
-# ------------------------------------------------------------
-# 9.2 Perform Grid Search
-# Purpose: Optimise similarity weights for best performance.
-# Reasoning/Justification: Improves recommendation relevance by fine-tuning parameters.
-# Notes:
-# - Use cross-validation to evaluate parameter effectiveness.
-# ------------------------------------------------------------
-
-# ------------------------------------------------------------
-# 9.3 Cross-Validation
-# Purpose: Evaluate engine performance across multiple folds of the dataset.
-# Reasoning/Justification: Ensures robustness and prevents overfitting.
-# Notes:
-# - Implement k-fold cross-validation with a suitable value for k.
-# ------------------------------------------------------------
-
-# ------------------------------------------------------------
-# 9.4 Evaluate Metrics
-# Purpose: Calculate Precision, Recall, F1 Score, ROC AUC, Top-10 Accuracy, and MRR.
-# Reasoning/Justification: Measures engine effectiveness quantitatively.
-# Notes:
-# - Use "Subject" as the primary label for evaluation.
-# ------------------------------------------------------------
-
-# ------------------------------------------------------------
-# 9.5 Visualise Hyperparameter Tuning Results
-# Purpose: Generate plots to analyse the effects of hyperparameters on evaluation metrics.
-# Reasoning/Justification: Highlights optimal parameter ranges and their impact on performance.
-# Notes:
-# - Include metrics such as Precision, Recall, F1, and MRR.
-# ------------------------------------------------------------
-
-# ------------------------------------------------------------
-# 9.6 Normalise Evaluation Metrics
-# Purpose: Standardise metrics to a common scale for easier comparison.
-# Reasoning/Justification: Improves interpretability and ensures consistent reporting.
-# Notes:
-# - Scale metrics to a 0-1 range or other relevant normalisation approach.
-# ------------------------------------------------------------
-
-# ------------------------------------------------------------
-# 9.7 Log Optimisation Process
-# Purpose: Document parameters, scores, and results for reproducibility.
-# Reasoning/Justification: Ensures transparency and facilitates debugging.
-# Notes:
-# - Log details to both console and a dedicated file.
-# ------------------------------------------------------------
+# ************************************************************
 
 
+
+# ************************************************************
 # ============================================================
-# 10. DEMONSTRATING THE RECOMMENDATION ENGINE
+# MILESTONE 7. SUCCESSFUL DEMONSTRATION OF THE RECOMMENDATION ENGINE
 # ============================================================
-
-# ------------------------------------------------------------
-# 10.1 Setup Demonstration Scenario
-# Purpose: Define a practical use case for the recommendation engine.
-# Reasoning/Justification: Validates engine functionality in context.
-# Notes:
-# - Example scenario: A new school requires book recommendations for a specific subject and year group.
-# ------------------------------------------------------------
-
-# ------------------------------------------------------------
-# 10.2 Validate Demonstration Inputs
-# Purpose: Ensure that the required inputs (ISBN, Subject, Year Group) are sufficient.
-# Reasoning/Justification: Prevents errors due to missing or invalid input.
-# Notes:
-# - Prompt the user for additional input if necessary.
-# ------------------------------------------------------------
-
-# ------------------------------------------------------------
-# 10.3 Generate and Rank Recommendations
-# Purpose: Use the recommendation engine to produce and rank a list of books based on similarity scores.
-# Reasoning/Justification: Demonstrates the engine's ability to generate accurate and relevant suggestions.
-# ------------------------------------------------------------
-
-# ------------------------------------------------------------
-# 10.4 Handle Insufficient Recommendations
-# Purpose: Return as many recommendations as possible if the top-N threshold is not met.
-# Reasoning/Justification: Ensures usability even when the dataset is limited.
-# ------------------------------------------------------------
-
-# ------------------------------------------------------------
-# 10.5 Display Recommendations
-# Purpose: Present the top recommendations in a user-friendly format.
-# Reasoning/Justification: Enhances usability and facilitates interpretation.
-# Notes:
-# - Display Book Title, Subject, Length, Published Decade, similarity score, and star ratings.
-# ------------------------------------------------------------
-
-# ------------------------------------------------------------
-# 10.6 Visualise Evaluation Metrics
-# Purpose: Summarise engine performance with plots.
-# Reasoning/Justification: Provides a clear, visual representation of results.
-# Notes:
-# - Include metrics such as Precision, Recall, F1 Score, and MRR.
-# - Use "state_colours" for state-based visualisations.
-# ------------------------------------------------------------
-
-# ------------------------------------------------------------
-# 10.7 Save Demonstration Outputs
-# Purpose: Log demonstration results for documentation and reporting purposes.
-# Reasoning/Justification: Ensures reproducibility and traceability.
-# Notes:
-# - Save inputs, outputs, and results to a log file.
-# ------------------------------------------------------------
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+# ************************************************************
 
 
 
