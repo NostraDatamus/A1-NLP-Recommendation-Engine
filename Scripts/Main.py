@@ -47,10 +47,12 @@ from nltk.tokenize import sent_tokenize, word_tokenize
 import spacy
 from sklearn.feature_extraction.text import CountVectorizer
 from sklearn.feature_extraction.text import TfidfTransformer
+import torch
+import json
 
 
 # Load spaCy's pre-trained model
-nlp = spacy.load("en_core_web_sm")
+nlp = spacy.load("en_core_web_trf")
 
 nltk.download('stopwords')
 nltk.download('wordnet')
@@ -271,14 +273,9 @@ enriched_dataset['Length'] = pd.cut(
 # - Unused features are removed to streamline the dataset.
 # ------------------------------------------------------------
 
-# Fill missing values with 'No_Text' or 'Unknown'
-enriched_dataset[['Consolidated_Description', 'Consolidated_Subject_Matter', 
-                  'Consolidated_Publisher', 'Consolidated_Author', 'Consolidated_Title']] = (
-    enriched_dataset[['Consolidated_Description', 'Consolidated_Subject_Matter', 
-                      'Consolidated_Publisher', 'Consolidated_Author', 'Consolidated_Title']]
-    .replace('', 'No_Text')  # Replace empty strings
-    .fillna('No_Text')       # Replace NaN
-)
+# Replace 'No_Text' with empty strings
+enriched_dataset[['Consolidated_Description', 'Consolidated_Subject_Matter', 'Consolidated_Publisher', 'Consolidated_Author', 'Consolidated_Title']] = enriched_dataset[['Consolidated_Description', 'Consolidated_Subject_Matter', 'Consolidated_Publisher', 'Consolidated_Author', 'Consolidated_Title']].replace('No_Text', '')
+
 
 # Drop rows that have no API data and print number dropped
 rows_to_drop = enriched_dataset[['G_Title', 'O_Title', 'T_Title']].replace('', np.nan).isna().all(axis=1)
@@ -294,7 +291,7 @@ enriched_dataset = enriched_dataset.drop(columns=['G_Title', 'G_Subtitle', 'G_Au
 cleaned_dataset = enriched_dataset.copy()
 print_dataset_summary(cleaned_dataset)
 #cleaned_dataset.to_excel(cleaned_dataset_path, index=False)
-cleaned_dataset.to_csv(r'c:\\university\\A1-NLP-Recommendation-Engine\\Outputs\\cleaned_dataset.csv', index=False)
+cleaned_dataset.to_csv(cleaned_dataset_path, index=False)
 
 
 # ============================================================
@@ -336,6 +333,8 @@ from Custom_Vocab import (
 # - Remove Stopwords to eliminate common words that do not contribute to the meaning.
 # - Lemmatisation to reduce words to their base or root form.
 # ------------------------------------------------------------
+
+
 
 # Combined function for text preprocessing
 def preprocess_text(text):
@@ -382,6 +381,10 @@ for col in text_columns:
 for col in text_columns:
     cleaned_dataset[col] = cleaned_dataset[col].fillna('No Text')
 
+#export the cleaned dataset
+cleaned_dataset.to_excel(cleaned_dataset_path, index=False)
+print("Cleaned Dataset saved successfully.")
+
 # ------------------------------------------------------------
 # 3.3 Near-Duplicate Detection and Removal
 # Purpose: Validate the cleaned corpus to ensure no invalid placeholders (e.g., 'No_Text') remain.
@@ -404,9 +407,11 @@ for col in text_columns:
 # - Sentence tokenisation precedes word tokenisation to ensure proper segmentation.
 # ------------------------------------------------------------
 
+# Sentence Tokenization Function
 def sentence_tokenize_column(dataset, column):
-    """Tokenize the text in the specified column into sentences."""
+    """Tokenize text into sentences and ensure the output is a Python list."""
     return dataset[column].apply(lambda x: sent_tokenize(x) if pd.notna(x) else [])
+
 
 # Apply sentence tokenization
 tokenised_corpus = cleaned_dataset.copy()
@@ -421,12 +426,19 @@ tokenised_corpus['Sentences_Subject_Matter'] = sentence_tokenize_column(cleaned_
 # - Retains numerics and tokens relevant to the domain.
 # ------------------------------------------------------------
 
+# Word Tokenization Function
 def word_tokenize_column(dataset, column):
+    """Tokenize text into words and ensure the output is a Python list."""
     return dataset[column].apply(lambda x: word_tokenize(x) if pd.notna(x) else [])
 
-# Apply word tokenization
+# Apply Word Tokenization
 tokenised_corpus['Words_Description'] = word_tokenize_column(tokenised_corpus, 'Consolidated_Description')
 tokenised_corpus['Words_Subject_Matter'] = word_tokenize_column(tokenised_corpus, 'Consolidated_Subject_Matter')
+
+
+# Convert lists to JSON strings for saving
+tokenised_corpus['Sentences_Description'] = tokenised_corpus['Sentences_Description'].apply(json.dumps)
+tokenised_corpus['Words_Description'] = tokenised_corpus['Words_Description'].apply(json.dumps)
 
 # Save the tokenized dataset
 print_dataset_summary(tokenised_corpus)
@@ -441,21 +453,42 @@ print("Tokenised Corpus saved successfully.")
 # - Use statistical measures like PMI to filter meaningful bigrams/trigrams.
 # ------------------------------------------------------------
 
-def extract_ngrams_for_document(document, ngram_range=(2, 3)):
-    """Extract bigrams and trigrams from a single document."""
-    vectorizer = CountVectorizer(ngram_range=ngram_range)
+def parse_stringified_lists(dataset, columns):
+    """Safely parse stringified lists into Python lists."""
+    for col in columns:
+        dataset[col] = dataset[col].apply(lambda x: json.loads(x) if isinstance(x, str) else x)
+    return dataset
+
+# Columns to parse
+token_columns = ['Sentences_Description', 'Words_Description', 'Sentences_Subject_Matter', 'Words_Subject_Matter']
+
+# Parse the columns safely
+tokenised_corpus = parse_stringified_lists(tokenised_corpus, token_columns)
+logger.info("Stringified tokenized columns parsed into Python lists successfully.")
+
+def extract_ngrams_for_document(tokens, ngram_range=(2, 3), min_df=1):
     try:
-        X = vectorizer.fit_transform([document])
-        tfidf_transformer = TfidfTransformer()
-        X_tfidf = tfidf_transformer.fit_transform(X)
+        if not tokens or len(tokens) < 2:
+            return []  # Skip empty or short token lists
+        text = " ".join(tokens)  # Join tokens into a single string
+        vectorizer = CountVectorizer(ngram_range=ngram_range, min_df=min_df, stop_words='english')
+        X = vectorizer.fit_transform([text])
         return vectorizer.get_feature_names_out()
     except ValueError:
         return []
 
 # Apply bigram/trigram extraction
-tokenised_corpus['Bigrams_Trigrams_Description'] = tokenised_corpus['Consolidated_Description'].apply(lambda x: extract_ngrams_for_document(x) if pd.notna(x) else [])
-tokenised_corpus['Bigrams_Trigrams_Subject_Matter'] = tokenised_corpus['Consolidated_Subject_Matter'].apply(lambda x: extract_ngrams_for_document(x) if pd.notna(x) else [])
-print('Bigrams and Trigrams extracted successfully.')
+tokenised_corpus['Bigrams_Trigrams_Words_Description'] = tokenised_corpus['Words_Description'].apply(
+    lambda x: extract_ngrams_for_document(x) if isinstance(x, list) else [])
+tokenised_corpus['Bigrams_Trigrams_Words_Subject_Matter'] = tokenised_corpus['Words_Subject_Matter'].apply(
+    lambda x: extract_ngrams_for_document(x) if isinstance(x, list) else [])
+tokenised_corpus['Bigrams_Trigrams_Sentences_Description'] = tokenised_corpus['Sentences_Description'].apply(
+    lambda x: extract_ngrams_for_document(x) if isinstance(x, list) else [])
+tokenised_corpus['Bigrams_Trigrams_Sentences_Subject_Matter'] = tokenised_corpus['Sentences_Subject_Matter'].apply(
+    lambda x: extract_ngrams_for_document(x) if isinstance(x, list) else [])
+
+logger.info('Bigrams and Trigrams extracted successfully.')
+
 
 # ------------------------------------------------------------
 # 4.4 Named Entity Recognition (NER)
@@ -466,22 +499,35 @@ print('Bigrams and Trigrams extracted successfully.')
 # - Entities can include educational terms, locations, and institutions.
 # ------------------------------------------------------------
 
-def extract_named_entities(text):
-    """Extract named entities from text using spaCy."""
+def extract_named_entities(text, exclude_types={'CARDINAL', 'QUANTITY'}):
+    """Extract named entities from text using spaCy, excluding specified entity types."""
     doc = nlp(text)
-    return [(ent.text, ent.label_) for ent in doc.ents]
+    return [(ent.text, ent.label_) for ent in doc.ents if ent.label_ not in exclude_types]
 
-# Apply named entity recognition
-tokenised_corpus['NER_Description'] = tokenised_corpus['Consolidated_Description'].apply(lambda x: extract_named_entities(x) if pd.notna(x) else [])
-tokenised_corpus['NER_Subject_Matter'] = tokenised_corpus['Consolidated_Subject_Matter'].apply(lambda x: extract_named_entities(x) if pd.notna(x) else [])
-tokenised_corpus['NER_Publisher'] = tokenised_corpus['Consolidated_Publisher'].apply(lambda x: extract_named_entities(x) if pd.notna(x) else [])
-tokenised_corpus['NER_Author'] = tokenised_corpus['Consolidated_Author'].apply(lambda x: extract_named_entities(x) if pd.notna(x) else [])
+# Apply named entity recognition with filtering
+tokenised_corpus['NER_Description'] = tokenised_corpus['Consolidated_Description'].apply(
+    lambda x: extract_named_entities(x) if pd.notna(x) else [])
+tokenised_corpus['NER_Subject_Matter'] = tokenised_corpus['Consolidated_Subject_Matter'].apply(
+    lambda x: extract_named_entities(x) if pd.notna(x) else [])
+tokenised_corpus['NER_Publisher'] = tokenised_corpus['Consolidated_Publisher'].apply(
+    lambda x: extract_named_entities(x) if pd.notna(x) else [])
+tokenised_corpus['NER_Author'] = tokenised_corpus['Consolidated_Author'].apply(
+    lambda x: extract_named_entities(x) if pd.notna(x) else [])
+
+logger.info("Named Entity Recognition completed with irrelevant entities excluded.")
+
+# Save the updated tokenized dataset
+tokenised_corpus.to_csv(tokenised_corpus_path, index=False)
+logger.info("Tokenised Corpus with NER and n-grams saved successfully.")
+
 
 # ------------------------------------------------------------
 # 3.4 Corpus Validation
 # Purpose: Validate the cleaned corpus to ensure no invalid placeholders (e.g., 'No_Text') remain.
 # Reasoning/Justification: Ensures the quality of the text data before further processing.
 # ------------------------------------------------------------
+
+# Drop unused features
 
 
 
