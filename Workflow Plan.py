@@ -232,6 +232,7 @@ Version     : 1.0
 # 4. TEXT REPRESENTATION AND TOKENISATION
 # ============================================================
 
+
 # ------------------------------------------------------------
 # 4.1 Sentence Tokenisation
 # Purpose: Split text into sentences to allow higher-level structural analysis.
@@ -273,21 +274,13 @@ Version     : 1.0
 # - Combine results from bigram/trigram extraction with domain-specific knowledge.
 # ------------------------------------------------------------
 
-# ------------------------------------------------------------
-# 4.6 Part-of-Speech (POS) Tagging
-# Purpose: Tag parts of speech to add linguistic context for advanced processing tasks.
-# Reasoning/Justification: Helps in filtering irrelevant words and improving vocabulary relevance.
-# Notes:
-# - Example: Retaining nouns and adjectives for content-heavy text analysis.
-# ------------------------------------------------------------
 
 # ------------------------------------------------------------
-# 4.7 Custom Vocabulary Building
-# Purpose: Curate the vocabulary to include domain-specific terms and exclude unnecessary tokens.
-# Reasoning/Justification: Aligns text representation with the educational domain and improves recommendation relevance.
-# Notes:
-# - Ensure curriculum-related terms are prioritised.
+# 3.4 Corpus Validation
+# Purpose: Validate the cleaned corpus to ensure no invalid placeholders (e.g., 'No_Text') remain.
+# Reasoning/Justification: Ensures the quality of the text data before further processing.
 # ------------------------------------------------------------
+
 
 
 # ============================================================
@@ -450,7 +443,7 @@ Version     : 1.0
 
 
 # ============================================================
-# 8. BUILDING THE RECOMMENDATION ENGINE & RECOMMEDNATION PROFILES
+# 8. BUILDING THE RECOMMENDATION ENGINE & PROFILES
 # ============================================================
 
 # ------------------------------------------------------------
@@ -633,39 +626,3 @@ Version     : 1.0
 # Notes:
 # - Save inputs, outputs, and results to a log file.
 # ------------------------------------------------------------
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

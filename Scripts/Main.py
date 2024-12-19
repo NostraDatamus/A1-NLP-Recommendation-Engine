@@ -49,6 +49,7 @@ from sklearn.feature_extraction.text import CountVectorizer
 from sklearn.feature_extraction.text import TfidfTransformer
 import torch
 import json
+from joblib import Parallel, delayed
 
 
 # Load spaCy's pre-trained model
@@ -540,16 +541,60 @@ print("Tokenised Corpus with NER and n-grams saved successfully.")
 
 
 
-
-
-
-
 # ************************************************************
 # ============================================================
 # MILESTONE 3. PRODUCE A DOCUMENT-TERM MATRIX
 # ============================================================
 # ************************************************************
 
+# ------------------------------------------------------------
+# 3.1 TF-IDF Vectorisation
+# Purpose: Convert the tokenised text data into a Document-Term Matrix using TF-IDF.
+# Reasoning/Justification: TF-IDF helps in representing the importance of terms in documents.
+# Notes:
+# - Use TF-IDF vectorizer from sklearn.
+# - Apply vectorization on the 'Words_Description', 'Words_Subject_Matter', 'Bigrams_Trigrams_Words_Description', 'Bigrams_Trigrams_Words_Subject_Matter', 'NER_Description', 'NER_Subject_Matter', and 'NER_Publisher' columns.
+# ------------------------------------------------------------
+
+from sklearn.feature_extraction.text import TfidfVectorizer
+from joblib import Parallel, delayed
+
+def create_tfidf_matrix(corpus, max_features=5000):
+    """Create a TF-IDF matrix for the given corpus."""
+    vectorizer = TfidfVectorizer(max_features=max_features)
+    tfidf_matrix = vectorizer.fit_transform(corpus)
+    return tfidf_matrix, vectorizer
+
+# Convert token lists back to strings for TF-IDF vectorization
+def join_tokens(tokens):
+    return ' '.join([token if isinstance(token, str) else token[0] for token in tokens])
+
+columns_to_vectorize = [
+    'Words_Description', 'Words_Subject_Matter',
+    'Bigrams_Trigrams_Words_Description', 'Bigrams_Trigrams_Words_Subject_Matter',
+    'NER_Description', 'NER_Subject_Matter', 'NER_Publisher'
+]
+
+for column in columns_to_vectorize:
+    tokenised_corpus[column + '_Text'] = Parallel(n_jobs=-1)(delayed(join_tokens)(tokens) for tokens in tokenised_corpus[column])
+
+# Create TF-IDF matrices for each feature
+tfidf_matrices = {}
+tfidf_vectorizers = {}
+
+for column in columns_to_vectorize:
+    tfidf_matrices[column], tfidf_vectorizers[column] = create_tfidf_matrix(tokenised_corpus[column + '_Text'])
+
+# Save the TF-IDF matrices and vectorizers for later use
+import joblib
+
+for column in columns_to_vectorize:
+    matrix_path = f'c:\\university\\A1-NLP-Recommendation-Engine\\Outputs\\models\\tfidf_matrix_{column.lower()}.pkl'
+    vectorizer_path = f'c:\\university\\A1-NLP-Recommendation-Engine\\Outputs\\models\\tfidf_vectorizer_{column.lower()}.pkl'
+    joblib.dump(tfidf_matrices[column], matrix_path)
+    joblib.dump(tfidf_vectorizers[column], vectorizer_path)
+
+logger.info("TF-IDF matrices and vectorizers saved successfully.")
 
 
 # ************************************************************
@@ -558,6 +603,56 @@ print("Tokenised Corpus with NER and n-grams saved successfully.")
 # ============================================================
 # ************************************************************
 
+# ------------------------------------------------------------
+# 4.1 Combine Features for Similarity Calculation
+# Purpose: Combine all relevant features into a single representation for similarity calculations.
+# Reasoning/Justification: Using a comprehensive set of features improves the accuracy of the similarity calculations.
+# ------------------------------------------------------------
+
+
+
+def combine_features(row):
+    """Combine all relevant features into a single string."""
+    return ' '.join(row['Words_Description']) + ' ' + \
+           ' '.join(row['Words_Subject_Matter']) + ' ' + \
+           ' '.join(row['Bigrams_Trigrams_Words_Description']) + ' ' + \
+           ' '.join(row['Bigrams_Trigrams_Words_Subject_Matter']) + ' ' + \
+           ' '.join([ent[0] for ent in row['NER_Description']]) + ' ' + \
+           ' '.join([ent[0] for ent in row['NER_Subject_Matter']]) + ' ' + \
+           ' '.join([ent[0] for ent in row['NER_Publisher']])
+
+# Apply the function to combine features using parallel processing
+tokenised_corpus['Combined_Features'] = Parallel(n_jobs=-1)(delayed(combine_features)(row) for _, row in tokenised_corpus.iterrows())
+
+# ------------------------------------------------------------
+# 4.2 Calculate Cosine Similarity
+# Purpose: Calculate the cosine similarity between documents based on the combined features.
+# Reasoning/Justification: Cosine similarity is a common measure for text similarity, capturing the angle between vectors.
+# ------------------------------------------------------------
+
+# Create TF-IDF matrix for combined features
+tfidf_matrix_combined, tfidf_vectorizer_combined = create_tfidf_matrix(tokenised_corpus['Combined_Features'])
+
+# Calculate cosine similarity matrix
+cosine_sim_matrix = cosine_similarity(tfidf_matrix_combined, tfidf_matrix_combined)
+
+# Save the cosine similarity matrix for later use
+cosine_sim_matrix_path = 'c:\\university\\A1-NLP-Recommendation-Engine\\Outputs\\models\\cosine_sim_matrix.pkl'
+joblib.dump(cosine_sim_matrix, cosine_sim_matrix_path)
+
+logger.info("Cosine similarity matrix saved successfully.")
+
+# ------------------------------------------------------------
+# 4.3 Visualise Cosine Similarity
+# Purpose: Visualise the cosine similarity matrix to identify patterns and clusters.
+# Reasoning/Justification: Visualisation aids in understanding the relationships between documents.
+# ------------------------------------------------------------
+
+# Plot the cosine similarity matrix
+plt.figure(figsize=(12, 10))
+sns.heatmap(cosine_sim_matrix, cmap='viridis', xticklabels=False, yticklabels=False)
+plt.title("Cosine Similarity Matrix")
+plt.show()
 
 
 # ************************************************************
