@@ -50,6 +50,8 @@ from sklearn.feature_extraction.text import TfidfTransformer
 import torch
 import json
 from joblib import Parallel, delayed
+from sklearn.feature_extraction.text import TfidfVectorizer
+from joblib import Parallel, delayed
 
 
 # Load spaCy's pre-trained model
@@ -511,7 +513,7 @@ logger.info("Tokenised Corpus with NER and n-grams saved successfully.")
 
 
 # ------------------------------------------------------------
-# 3.4 Corpus Validation
+# 4.5 Corpus Validation
 # Purpose: Validate the cleaned corpus to ensure no invalid placeholders (e.g., 'No_Text') remain.
 # Reasoning/Justification: Ensures the quality of the text data before further processing.
 # ------------------------------------------------------------
@@ -540,15 +542,26 @@ print("Tokenised Corpus with NER and n-grams saved successfully.")
 
 
 
+# ============================================================
+# 5. BUILDING THE DOCUMENT MATRIX
+# ============================================================
 
-# ************************************************************
-# ============================================================
-# MILESTONE 3. PRODUCE A DOCUMENT-TERM MATRIX
-# ============================================================
-# ************************************************************
+
 
 # ------------------------------------------------------------
-# 3.1 TF-IDF Vectorisation
+# 5.1 Create Recommendation Profiles for School, Year Group and Subject.
+# Purpose: Generate user profiles based on school, year group, and subject preferences.
+# Reasoning/Justification: Profiles enable personalised recommendations by capturing user preferences.
+# Notes:
+# - 
+# - 
+# ------------------------------------------------------------
+
+
+
+
+# ------------------------------------------------------------
+# 5.2 TF-IDF Vectorisation
 # Purpose: Convert the tokenised text data into a Document-Term Matrix using TF-IDF.
 # Reasoning/Justification: TF-IDF helps in representing the importance of terms in documents.
 # Notes:
@@ -556,8 +569,7 @@ print("Tokenised Corpus with NER and n-grams saved successfully.")
 # - Apply vectorization on the 'Words_Description', 'Words_Subject_Matter', 'Bigrams_Trigrams_Words_Description', 'Bigrams_Trigrams_Words_Subject_Matter', 'NER_Description', 'NER_Subject_Matter', and 'NER_Publisher' columns.
 # ------------------------------------------------------------
 
-from sklearn.feature_extraction.text import TfidfVectorizer
-from joblib import Parallel, delayed
+
 
 def create_tfidf_matrix(corpus, max_features=5000):
     """Create a TF-IDF matrix for the given corpus."""
@@ -596,10 +608,82 @@ for column in columns_to_vectorize:
 
 logger.info("TF-IDF matrices and vectorizers saved successfully.")
 
+# ------------------------------------------------------------
+# 5.3 Inspect Sparsity
+# Purpose: Evaluate the sparsity of the TF-IDF matrix.
+# Reasoning/Justification: Identifies potential issues with high-dimensional sparse data.
+# Notes:
+# - If sparsity is too high, consider dimensionality reduction techniques.
+# ------------------------------------------------------------
+
+# ------------------------------------------------------------
+# 5.4 Apply Dimensionality Reduction (if necessary)
+# Purpose: Reduce the dimensionality of the document matrix.
+# Reasoning/Justification: Improves computational efficiency without sacrificing relevance.
+# Notes:
+# - Techniques like Singular Value Decomposition (SVD) may be applied.
+# ------------------------------------------------------------
+
+# ------------------------------------------------------------
+# 5.5 Save Document Matrix
+# Purpose: Save the TF-IDF matrix for reproducibility and downstream tasks.
+# Reasoning/Justification: Ensures the matrix can be reused without reprocessing.
+# Notes:
+# - Use a suitable file format such as `.npz` for sparse matrices.
+# ------------------------------------------------------------
+
+
+
+
+# ************************************************************
+# ============================================================
+# MILESTONE 3. PRODUCE A DOCUMENT-TERM MATRIX
+#
+# Deliverables:
+# - Generate and save a TF-IDF document-term matrix for the entire corpus.
+# - Create and save individual TF-IDF matrices for key features: descriptions, subject matter, and NER outputs.
+# - Ensure inclusion of additional features such as bigrams and trigrams for enriched representation.
+# - Integrate and normalize profile data (School, Subject, Year Group) into the document-term matrix.
+# - Inspect and document sparsity levels in the generated matrices.
+# - Save all processed matrices and relevant metadata for reproducibility.
+#
+# Steps:
+# 1. Preprocess tokenized text and concatenate features into combined strings suitable for TF-IDF processing.
+# 2. Generate TF-IDF matrices for descriptions, subject matter, and other key textual components.
+# 3. Integrate profile data by appending normalized counts (School Sum, Subject_Sum, Year Group Sum) to the document-term matrix.
+# 4. Evaluate the sparsity of the TF-IDF matrices to determine if dimensionality reduction is necessary.
+# 5. If needed, apply dimensionality reduction techniques such as PCA or SVD to optimize efficiency.
+# 6. Save the document-term matrix and individual matrices for downstream use in similarity and recommendation tasks.
+# ============================================================
+# ************************************************************
+
+
+
+
+
+
+
+
+
+
+
 
 # ************************************************************
 # ============================================================
 # MILESTONE 4. PRODUCE A SIMILARITY MATRIX
+#
+# Deliverables:
+# - Generate a cosine similarity matrix for the entire dataset.
+# - Incorporate profile features (School, Subject, Year Group) into similarity calculations.
+# - Produce visualizations (e.g., heatmaps) of the similarity matrix to identify patterns and clusters.
+# - Save the similarity matrix for use in downstream tasks.
+#
+# Steps:
+# 1. Combine all relevant features (e.g., descriptions, NER, bigrams/trigrams) and profiles into a single representation.
+# 2. Generate a TF-IDF matrix from the combined features.
+# 3. Compute the cosine similarity matrix using the TF-IDF vectors.
+# 4. Visualize the cosine similarity matrix to identify potential clusters or patterns.
+# 5. Save the cosine similarity matrix and related artifacts for reproducibility.
 # ============================================================
 # ************************************************************
 
@@ -655,9 +739,18 @@ plt.title("Cosine Similarity Matrix")
 plt.show()
 
 
+
+
+
 # ************************************************************
 # ============================================================
 # MILESTONE 5. PRODUCE A FUNCTIONAL RECOMMENDATION ENGINE
+#
+# - Filtering and Ranking
+# - User Inputs and Profile Matching
+# - 
+# - 
+#
 # ============================================================
 # ************************************************************
 
@@ -666,6 +759,12 @@ plt.show()
 # ************************************************************
 # ============================================================
 # MILESTONE 6. VALIDATE AND OPTIMISE THE RECOMMENDATION ENGINE
+#
+# - Validation Metrics
+# - Optimisation Techniques
+# - Weighting and Scoring
+# - Dimensionality Reduction
+#
 # ============================================================
 # ************************************************************
 
@@ -674,6 +773,12 @@ plt.show()
 # ************************************************************
 # ============================================================
 # MILESTONE 7. SUCCESSFUL DEMONSTRATION OF THE RECOMMENDATION ENGINE
+#
+# - Query Scenario 'A new school is looking for Science textbooks for year 9.'
+# - 
+# - 
+# - 
+#
 # ============================================================
 # ************************************************************
 
